@@ -94,16 +94,58 @@ function chunkText(text, chunkSize = 500, overlap = 100) {
   return chunks;
 }
 
+// ── Helper: Validate API key ───────────────────────────────
+function validateApiKey(apiKey) {
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error('Please enter your OpenRouter API key in the config bar above.');
+  }
+}
+
+// ── Plain QA Chat: No PDF, just question answering ──────────
+app.post('/api/chat/plain', async (req, res) => {
+  try {
+    const { question, apiKey, model, systemPrompt } = req.body;
+    validateApiKey(apiKey);
+
+    const defaultSystem = systemPrompt?.trim()
+      ? systemPrompt.trim()
+      : 'You are a helpful assistant. Answer the user\'s question clearly and concisely.';
+
+    const messages = [
+      { role: 'system', content: defaultSystem },
+      { role: 'user', content: question },
+    ];
+
+    const result = await callOpenRouter(messages, apiKey, model);
+    res.json({
+      answer: result.content,
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
+      totalTokens: result.totalTokens,
+      contextSent: 'None (plain QA)',
+      chunksUsed: 0,
+      totalChunks: 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── No-RAG Chat: Stuff entire PDF into prompt ──────────────
 app.post('/api/chat/norag', async (req, res) => {
   try {
-    const { question, apiKey, model } = req.body;
+    const { question, apiKey, model, systemPrompt } = req.body;
+    validateApiKey(apiKey);
     if (!pdfStore.text) return res.status(400).json({ error: 'No PDF uploaded' });
+
+    const baseSystem = systemPrompt?.trim()
+      ? systemPrompt.trim()
+      : `You are a helpful assistant. Below is the FULL content of a PDF document. Use ONLY this content to answer the user's question. If the answer is not in the document, say "I cannot find the answer in the document."`;
 
     const messages = [
       {
         role: 'system',
-        content: `You are a helpful assistant. Below is the FULL content of a PDF document. Use ONLY this content to answer the user's question. If the answer is not in the document, say "I cannot find the answer in the document."\n\n--- FULL PDF CONTENT (entire document) ---\n${pdfStore.text}\n--- END OF PDF CONTENT ---`
+        content: `${baseSystem}\n\n--- FULL PDF CONTENT (entire document) ---\n${pdfStore.text}\n--- END OF PDF CONTENT ---`
       },
       { role: 'user', content: question },
     ];
@@ -126,7 +168,8 @@ app.post('/api/chat/norag', async (req, res) => {
 // ── RAG Chat: Chunk → Embed → Retrieve → Prompt ──────────
 app.post('/api/chat/rag', async (req, res) => {
   try {
-    const { question, apiKey, model } = req.body;
+    const { question, apiKey, model, systemPrompt } = req.body;
+    validateApiKey(apiKey);
     if (!pdfStore.text) return res.status(400).json({ error: 'No PDF uploaded' });
 
     // 1. Chunk the PDF text
@@ -139,7 +182,7 @@ app.post('/api/chat/rag', async (req, res) => {
     const questionEmbedding = embeddings[embeddings.length - 1];
     const chunkEmbeddings = embeddings.slice(0, -1);
 
-    // 3. Compute similarity and pick top 3
+    // 3. Compute similarity and pick top 5
     const scored = chunkEmbeddings.map((emb, i) => ({
       index: i,
       score: cosineSim(questionEmbedding, emb),
@@ -156,10 +199,14 @@ app.post('/api/chat/rag', async (req, res) => {
       .map((c, i) => `[Chunk ${i + 1} (relevance: ${(c.score * 100).toFixed(1)}%)]\n${c.text}`)
       .join('\n\n');
 
+    const baseSystem = systemPrompt?.trim()
+      ? systemPrompt.trim()
+      : `You are a helpful assistant. Use ONLY the following relevant excerpts from a PDF document to answer the user's question. If the answer is not in the excerpts, say "I cannot find the answer in the provided context."`;
+
     const messages = [
       {
         role: 'system',
-        content: `You are a helpful assistant. Use ONLY the following relevant excerpts from a PDF document to answer the user's question. If the answer is not in the excerpts, say "I cannot find the answer in the provided context."\n\n--- RELEVANT EXCERPTS (RAG retrieved) ---\n${context}\n--- END OF EXCERPTS ---`
+        content: `${baseSystem}\n\n--- RELEVANT EXCERPTS (RAG retrieved) ---\n${context}\n--- END OF EXCERPTS ---`
       },
       { role: 'user', content: question },
     ];

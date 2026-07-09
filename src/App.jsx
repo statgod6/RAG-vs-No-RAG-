@@ -4,14 +4,16 @@ import './App.css';
 
 const API_BASE = 'http://localhost:3001';
 
-function ChatPanel({ title, type, pdfUploaded, apiKey, model, color }) {
+function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPrompt }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
 
   const sendQuestion = async () => {
-    if (!input.trim() || !pdfUploaded) return;
+    if (!input.trim()) return;
+    // Plain QA doesn't need a PDF; others do
+    if (type !== 'plain' && !pdfUploaded) return;
     const question = input.trim();
     setInput('');
     setLoading(true);
@@ -22,7 +24,7 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color }) {
       const res = await fetch(`${API_BASE}/api/chat/${type}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, apiKey, model }),
+        body: JSON.stringify({ question, apiKey, model, systemPrompt }),
       });
       const data = await res.json();
 
@@ -51,7 +53,7 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color }) {
     <div className={`chat-panel ${color}`}>
       <div className="panel-header">
         <h2>{title}</h2>
-        <span className="badge">{type === 'norag' ? 'No RAG — Full PDF' : 'RAG — Smart Retrieval'}</span>
+        <span className="badge">{type === 'plain' ? 'Plain QA — No Context' : type === 'norag' ? 'No RAG — Full PDF' : 'RAG — Smart Retrieval'}</span>
       </div>
 
       {stats && (
@@ -116,10 +118,10 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color }) {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && sendQuestion()}
-          placeholder={pdfUploaded ? 'Ask a question about the PDF...' : 'Upload a PDF first'}
-          disabled={!pdfUploaded || loading}
+          placeholder={type === 'plain' ? 'Ask any question...' : (pdfUploaded ? 'Ask a question about the PDF...' : 'Upload a PDF first')}
+          disabled={(type !== 'plain' && !pdfUploaded) || loading}
         />
-        <button onClick={sendQuestion} disabled={!pdfUploaded || loading}>
+        <button onClick={sendQuestion} disabled={(type !== 'plain' && !pdfUploaded) || loading}>
           Send
         </button>
       </div>
@@ -133,6 +135,8 @@ export default function App() {
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfInfo, setPdfInfo] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [promptExpanded, setPromptExpanded] = useState(false);
 
   const uploadPdf = async () => {
     if (!pdfFile) return;
@@ -195,9 +199,37 @@ export default function App() {
             </span>
           )}
         </div>
+        <div className="config-group config-group-wide">
+          <label
+            className="prompt-toggle"
+            onClick={() => setPromptExpanded(p => !p)}
+          >
+            Custom System Prompt {promptExpanded ? '▾' : '▸'} <span className="prompt-hint">(applies to all chats)</span>
+          </label>
+          {promptExpanded && (
+            <textarea
+              className="system-prompt-input"
+              value={systemPrompt}
+              onChange={e => setSystemPrompt(e.target.value)}
+              placeholder="Leave empty for default prompts, or write your own system prompt for all three chat modes..."
+              rows={3}
+            />
+          )}
+        </div>
       </div>
 
-      <div className="panels">
+      <div className="panels-top">
+        <ChatPanel
+          title="Plain QA"
+          type="plain"
+          pdfUploaded={true}
+          apiKey={apiKey}
+          model={model}
+          color="blue"
+          systemPrompt={systemPrompt}
+        />
+      </div>
+      <div className="panels-bottom">
         <ChatPanel
           title="No RAG"
           type="norag"
@@ -205,6 +237,7 @@ export default function App() {
           apiKey={apiKey}
           model={model}
           color="red"
+          systemPrompt={systemPrompt}
         />
         <ChatPanel
           title="RAG"
@@ -213,6 +246,7 @@ export default function App() {
           apiKey={apiKey}
           model={model}
           color="green"
+          systemPrompt={systemPrompt}
         />
       </div>
     </div>
