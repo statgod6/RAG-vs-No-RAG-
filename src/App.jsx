@@ -160,8 +160,8 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>RAG vs No-RAG Demo</h1>
-        <p className="subtitle">See why Retrieval-Augmented Generation saves tokens, money, and gives better answers</p>
+        <h1>Plain QA vs No-RAG vs RAG</h1>
+        <p className="subtitle">Compare how context strategy affects answer quality, token usage, and cost</p>
       </header>
 
       <div className="config-bar">
