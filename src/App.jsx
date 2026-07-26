@@ -165,7 +165,7 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
 export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [tavilyKey, setTavilyKey] = useState('');
-  const [model, setModel] = useState('meta-llama/llama-3.1-8b-instruct:free');
+  const [model, setModel] = useState('deepseek/deepseek-v4-flash');
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfInfo, setPdfInfo] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -220,12 +220,7 @@ export default function App() {
         <div className="config-group">
           <label>Model</label>
           <select value={model} onChange={e => setModel(e.target.value)}>
-            <option value="meta-llama/llama-3.1-8b-instruct:free">Llama 3.1 8B (Free)</option>
-            <option value="google/gemini-2.0-flash-exp:free">Gemini 2.0 Flash (Free)</option>
-            <option value="mistralai/mistral-7b-instruct:free">Mistral 7B (Free)</option>
             <option value="deepseek/deepseek-v4-flash">DeepSeek V4 Flash</option>
-            <option value="meta-llama/llama-3.1-70b-instruct">Llama 3.1 70B</option>
-            <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
           </select>
         </div>
         <div className="config-group">
