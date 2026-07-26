@@ -221,7 +221,6 @@ export default function App() {
           <label>Model</label>
           <select value={model} onChange={e => setModel(e.target.value)}>
             <option value="deepseek/deepseek-v4-flash">DeepSeek V4 Flash</option>
-            <option value="poolside/laguna-s-2.1:free">Laguna S 2.1 (Free)</option>
             <option value="inclusionai/ling-3.0-flash:free">Ling 3.0 Flash (Free)</option>
           </select>
         </div>
