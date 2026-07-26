@@ -4,16 +4,18 @@ import './App.css';
 
 const API_BASE = 'http://localhost:3001';
 
-function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPrompt }) {
+function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPrompt, tavilyKey }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
 
+  // Only the PDF-based modes require an uploaded document
+  const needsPdf = type === 'norag' || type === 'rag';
+
   const sendQuestion = async () => {
     if (!input.trim()) return;
-    // Plain QA doesn't need a PDF; others do
-    if (type !== 'plain' && !pdfUploaded) return;
+    if (needsPdf && !pdfUploaded) return;
     const question = input.trim();
     setInput('');
     setLoading(true);
@@ -24,7 +26,7 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
       const res = await fetch(`${API_BASE}/api/chat/${type}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, apiKey, model, systemPrompt }),
+        body: JSON.stringify({ question, apiKey, model, systemPrompt, tavilyKey }),
       });
       const data = await res.json();
 
@@ -41,6 +43,7 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
           chunksUsed: data.chunksUsed,
           totalChunks: data.totalChunks,
           retrievedChunks: data.retrievedChunks || [],
+          sources: data.sources || [],
         });
       }
     } catch (err) {
@@ -49,11 +52,27 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
     setLoading(false);
   };
 
+  const badgeLabel = type === 'plain'
+    ? 'Plain QA — No Context'
+    : type === 'norag'
+      ? 'No RAG — Full PDF'
+      : type === 'search'
+        ? 'Web Search — Tavily'
+        : 'RAG — Smart Retrieval';
+
+  const placeholder = needsPdf
+    ? (pdfUploaded ? 'Ask a question about the PDF...' : 'Upload a PDF first')
+    : type === 'search'
+      ? 'Search the web...'
+      : 'Ask any question...';
+
+  const disabled = (needsPdf && !pdfUploaded) || loading;
+
   return (
     <div className={`chat-panel ${color}`}>
       <div className="panel-header">
         <h2>{title}</h2>
-        <span className="badge">{type === 'plain' ? 'Plain QA — No Context' : type === 'norag' ? 'No RAG — Full PDF' : 'RAG — Smart Retrieval'}</span>
+        <span className="badge">{badgeLabel}</span>
       </div>
 
       {stats && (
@@ -91,6 +110,20 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
         </details>
       )}
 
+      {stats?.sources?.length > 0 && (
+        <details className="chunks-detail">
+          <summary>Web Sources ({stats.sources.length})</summary>
+          {stats.sources.map((s, i) => (
+            <div key={i} className="chunk-item">
+              <span className="chunk-score">{(s.score * 100).toFixed(1)}%</span>
+              <a className="source-link" href={s.url} target="_blank" rel="noopener noreferrer">
+                {s.title || s.url}
+              </a>
+            </div>
+          ))}
+        </details>
+      )}
+
       <div className="messages">
         {messages.map((msg, i) => (
           <div key={i} className={`message ${msg.role}`}>
@@ -118,10 +151,10 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && sendQuestion()}
-          placeholder={type === 'plain' ? 'Ask any question...' : (pdfUploaded ? 'Ask a question about the PDF...' : 'Upload a PDF first')}
-          disabled={(type !== 'plain' && !pdfUploaded) || loading}
+          placeholder={placeholder}
+          disabled={disabled}
         />
-        <button onClick={sendQuestion} disabled={(type !== 'plain' && !pdfUploaded) || loading}>
+        <button onClick={sendQuestion} disabled={disabled}>
           Send
         </button>
       </div>
@@ -131,6 +164,7 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
 
 export default function App() {
   const [apiKey, setApiKey] = useState('');
+  const [tavilyKey, setTavilyKey] = useState('');
   const [model, setModel] = useState('meta-llama/llama-3.1-8b-instruct:free');
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfInfo, setPdfInfo] = useState(null);
@@ -160,7 +194,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Plain QA vs No-RAG vs RAG</h1>
+        <h1>Plain QA vs No-RAG vs RAG vs Web Search</h1>
         <p className="subtitle">Compare how context strategy affects answer quality, token usage, and cost</p>
       </header>
 
@@ -172,6 +206,15 @@ export default function App() {
             value={apiKey}
             onChange={e => setApiKey(e.target.value)}
             placeholder="sk-or-v1-..."
+          />
+        </div>
+        <div className="config-group">
+          <label>Tavily API Key</label>
+          <input
+            type="password"
+            value={tavilyKey}
+            onChange={e => setTavilyKey(e.target.value)}
+            placeholder="tvly-..."
           />
         </div>
         <div className="config-group">
@@ -227,6 +270,16 @@ export default function App() {
           model={model}
           color="blue"
           systemPrompt={systemPrompt}
+        />
+        <ChatPanel
+          title="Web Search"
+          type="search"
+          pdfUploaded={true}
+          apiKey={apiKey}
+          model={model}
+          color="purple"
+          systemPrompt={systemPrompt}
+          tavilyKey={tavilyKey}
         />
       </div>
       <div className="panels-bottom">

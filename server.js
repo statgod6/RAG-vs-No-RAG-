@@ -71,6 +71,34 @@ async function getEmbeddings(texts, apiKey) {
   };
 }
 
+// ── Helper: Call Tavily web search ──────────────────────────
+async function callTavily(query, tavilyKey, maxResults = 5) {
+  const resp = await fetch('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${tavilyKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      search_depth: 'advanced',
+      max_results: maxResults,
+    }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    throw new Error(data.error || data.detail || `Tavily request failed (${resp.status})`);
+  }
+  return {
+    results: (data.results || []).map(r => ({
+      title: r.title,
+      url: r.url,
+      content: r.content || '',
+      score: r.score || 0,
+    })),
+  };
+}
+
 // ── Helper: Cosine similarity ───────────────────────────────
 function cosineSim(a, b) {
   let dot = 0, magA = 0, magB = 0;
@@ -98,6 +126,13 @@ function chunkText(text, chunkSize = 500, overlap = 100) {
 function validateApiKey(apiKey) {
   if (!apiKey || !apiKey.trim()) {
     throw new Error('Please enter your OpenRouter API key in the config bar above.');
+  }
+}
+
+// ── Helper: Validate Tavily key ────────────────────────────
+function validateTavilyKey(tavilyKey) {
+  if (!tavilyKey || !tavilyKey.trim()) {
+    throw new Error('Please enter your Tavily API key in the config bar above.');
   }
 }
 
@@ -224,6 +259,65 @@ app.post('/api/chat/rag', async (req, res) => {
       retrievedChunks: relevantChunks.map(c => ({
         preview: c.text.substring(0, 150) + '...',
         score: c.score,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Web Search Chat: Tavily retrieve → Prompt (Web-RAG) ────
+app.post('/api/chat/search', async (req, res) => {
+  try {
+    const { question, apiKey, model, systemPrompt, tavilyKey } = req.body;
+    validateApiKey(apiKey);
+    validateTavilyKey(tavilyKey);
+
+    // 1. Retrieve live web results from Tavily
+    const { results } = await callTavily(question, tavilyKey, 5);
+    if (results.length === 0) {
+      return res.json({
+        answer: 'No web results were found for this query.',
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        contextSent: '0 web results',
+        chunksUsed: 0,
+        totalChunks: 0,
+        sources: [],
+      });
+    }
+
+    // 2. Build context from the retrieved web results
+    const context = results
+      .map((r, i) => `[Source ${i + 1}: ${r.title} (${r.url})]\n${r.content}`)
+      .join('\n\n');
+
+    const baseSystem = systemPrompt?.trim()
+      ? systemPrompt.trim()
+      : `You are a helpful assistant with access to live web search results. Use ONLY the following web excerpts to answer the user's question, and cite the source number(s) you rely on. If the answer is not in the excerpts, say "I cannot find the answer in the web results."`;
+
+    const messages = [
+      {
+        role: 'system',
+        content: `${baseSystem}\n\n--- WEB SEARCH RESULTS (Tavily retrieved) ---\n${context}\n--- END OF RESULTS ---`
+      },
+      { role: 'user', content: question },
+    ];
+
+    const result = await callOpenRouter(messages, apiKey, model);
+    res.json({
+      answer: result.content,
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
+      totalTokens: result.totalTokens,
+      contextSent: `${results.length} web results`,
+      chunksUsed: results.length,
+      totalChunks: results.length,
+      sources: results.map(r => ({
+        title: r.title,
+        url: r.url,
+        score: r.score,
       })),
     });
   } catch (err) {

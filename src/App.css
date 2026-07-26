@@ -153,7 +153,7 @@ body {
 /* Panels — Stacked Layout */
 .panels-top {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 20px;
   min-height: 38vh;
   margin-bottom: 20px;
@@ -183,6 +183,9 @@ body {
 }
 .chat-panel.blue {
   border-color: #3b82f6;
+}
+.chat-panel.purple {
+  border-color: #8b5cf6;
 }
 
 .panel-header {
@@ -215,6 +218,10 @@ body {
 .chat-panel.blue .badge {
   background: rgba(59, 130, 246, 0.1);
   color: #2563eb;
+}
+.chat-panel.purple .badge {
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
 }
 
 /* Stats Bar */
@@ -283,6 +290,16 @@ body {
   color: #6b7280;
   font-size: 0.75rem;
   line-height: 1.3;
+}
+.source-link {
+  color: #7c3aed;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  text-decoration: none;
+  word-break: break-word;
+}
+.source-link:hover {
+  text-decoration: underline;
 }
 
 /* Messages */
