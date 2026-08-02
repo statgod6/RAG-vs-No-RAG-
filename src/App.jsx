@@ -55,13 +55,13 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
   const badgeLabel = type === 'plain'
     ? 'Plain QA — No Context'
     : type === 'norag'
-      ? 'No RAG — Full PDF'
+      ? 'No RAG — Full Document'
       : type === 'search'
         ? 'Web Search — Tavily'
         : 'RAG — Smart Retrieval';
 
   const placeholder = needsPdf
-    ? (pdfUploaded ? 'Ask a question about the PDF...' : 'Upload a PDF first')
+    ? (pdfUploaded ? 'Ask a question about the document...' : 'Upload a PDF or DOCX first')
     : type === 'search'
       ? 'Search the web...'
       : 'Ask any question...';
@@ -225,9 +225,9 @@ export default function App() {
           </select>
         </div>
         <div className="config-group">
-          <label>Upload PDF</label>
+          <label>Upload Document</label>
           <div className="upload-row">
-            <input type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} />
+            <input type="file" accept=".pdf,.docx" onChange={e => setPdfFile(e.target.files[0])} />
             <button onClick={uploadPdf} disabled={!pdfFile || uploading}>
               {uploading ? 'Parsing...' : 'Upload & Parse'}
             </button>

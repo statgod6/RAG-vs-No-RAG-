@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import { PDFParse } from 'pdf-parse';
+import mammoth from 'mammoth';
+import path from 'path';
 // Uses built-in fetch (Node 18+)
 
 const app = express();
@@ -13,17 +15,26 @@ const upload = multer({ storage: multer.memoryStorage() });
 // In-memory store for the uploaded PDF text
 let pdfStore = { text: '', filename: '' };
 
-// ── PDF Upload ──────────────────────────────────────────────
+// ── Document Upload (PDF or DOCX) ───────────────────────────
 app.post('/api/upload', upload.single('pdf'), async (req, res) => {
   try {
-    const parser = new PDFParse({ data: req.file.buffer });
-    const textResult = await parser.getText();
-    const fullText = textResult.text;
-    await parser.destroy();
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    let fullText = '';
+
+    if (ext === '.docx') {
+      const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+      fullText = result.value;
+    } else {
+      const parser = new PDFParse({ data: req.file.buffer });
+      const textResult = await parser.getText();
+      fullText = textResult.text;
+      await parser.destroy();
+    }
+
     pdfStore = { text: fullText, filename: req.file.originalname };
     res.json({ filename: pdfStore.filename, charCount: pdfStore.text.length });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to parse PDF: ' + err.message });
+    res.status(500).json({ error: 'Failed to parse document: ' + err.message });
   }
 });
 
