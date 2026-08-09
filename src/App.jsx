@@ -89,7 +89,7 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
             <span className="stat-label">Context Sent</span>
             <span className="stat-value small">{stats.contextSent}</span>
           </div>
-          {type === 'rag' && stats.embedTokens > 0 && (
+          {(type === 'rag') && stats.embedTokens > 0 && (
             <div className="stat">
               <span className="stat-label">Embed Tokens</span>
               <span className="stat-value low">{stats.embedTokens}</span>
@@ -194,7 +194,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Plain QA vs No-RAG vs RAG vs Web Search</h1>
+        <h1>Plain QA vs Web Search vs No-RAG vs RAG</h1>
         <p className="subtitle">Compare how context strategy affects answer quality, token usage, and cost</p>
       </header>
 
@@ -257,7 +257,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="panels-top">
+      <div className="panels-grid">
         <ChatPanel
           title="Plain QA"
           type="plain"
@@ -277,8 +277,6 @@ export default function App() {
           systemPrompt={systemPrompt}
           tavilyKey={tavilyKey}
         />
-      </div>
-      <div className="panels-bottom">
         <ChatPanel
           title="No RAG"
           type="norag"

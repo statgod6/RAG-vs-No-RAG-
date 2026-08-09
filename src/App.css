@@ -150,15 +150,8 @@ body {
   margin-top: 4px;
 }
 
-/* Panels — Stacked Layout */
-.panels-top {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  min-height: 38vh;
-  margin-bottom: 20px;
-}
-.panels-bottom {
+/* Panels — 2×2 Grid Layout */
+.panels-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
