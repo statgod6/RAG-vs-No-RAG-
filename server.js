@@ -121,14 +121,16 @@ function cosineSim(a, b) {
   return dot / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
-// ── Helper: Chunk text ──────────────────────────────────────
-function chunkText(text, chunkSize = 500, overlap = 100) {
-  const words = text.split(/\s+/);
+// ── Helper: Chunk text into exactly N chunks ─────────────────
+function chunkText(text, numChunks = 5) {
+  const words = text.split(/\s+/).filter(w => w.length > 0);
+  if (words.length <= numChunks) return words.map(w => w);
+  const size = Math.ceil(words.length / numChunks);
   const chunks = [];
-  for (let i = 0; i < words.length; i += chunkSize - overlap) {
-    const chunk = words.slice(i, i + chunkSize).join(' ');
-    if (chunk.trim().length > 0) chunks.push(chunk);
-    if (i + chunkSize >= words.length) break;
+  for (let i = 0; i < numChunks; i++) {
+    const start = i * size;
+    const chunk = words.slice(start, Math.min(start + size, words.length)).join(' ');
+    if (chunk.trim()) chunks.push(chunk);
   }
   return chunks;
 }
@@ -147,185 +149,88 @@ function validateTavilyKey(tavilyKey) {
   }
 }
 
-// ── Plain QA Chat: No PDF, just question answering ──────────
-app.post('/api/chat/plain', async (req, res) => {
+// ── Combined RAG + Search Chat ───────────────────────────────
+app.post('/api/chat', async (req, res) => {
   try {
-    const { question, apiKey, model, systemPrompt } = req.body;
+    const { question, apiKey, model, systemPrompt, tavilyKey } = req.body;
     validateApiKey(apiKey);
+    if (!pdfStore.text) return res.status(400).json({ error: 'No document uploaded. Please upload a PDF or DOCX first.' });
 
-    const defaultSystem = systemPrompt?.trim()
-      ? systemPrompt.trim()
-      : 'You are a helpful assistant. Answer the user\'s question clearly and concisely.';
+    // 1. Chunk the document into exactly 5 chunks
+    const chunks = chunkText(pdfStore.text, 5);
 
-    const messages = [
-      { role: 'system', content: defaultSystem },
-      { role: 'user', content: question },
-    ];
-
-    const result = await callOpenRouter(messages, apiKey, model);
-    res.json({
-      answer: result.content,
-      promptTokens: result.promptTokens,
-      completionTokens: result.completionTokens,
-      totalTokens: result.totalTokens,
-      contextSent: 'None (plain QA)',
-      chunksUsed: 0,
-      totalChunks: 0,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── No-RAG Chat: Stuff entire PDF into prompt ──────────────
-app.post('/api/chat/norag', async (req, res) => {
-  try {
-    const { question, apiKey, model, systemPrompt } = req.body;
-    validateApiKey(apiKey);
-    if (!pdfStore.text) return res.status(400).json({ error: 'No PDF uploaded' });
-
-    const baseSystem = systemPrompt?.trim()
-      ? systemPrompt.trim()
-      : `You are a helpful assistant. Below is the FULL content of a PDF document. Use ONLY this content to answer the user's question. If the answer is not in the document, say "I cannot find the answer in the document."`;
-
-    const messages = [
-      {
-        role: 'system',
-        content: `${baseSystem}\n\n--- FULL PDF CONTENT (entire document) ---\n${pdfStore.text}\n--- END OF PDF CONTENT ---`
-      },
-      { role: 'user', content: question },
-    ];
-
-    const result = await callOpenRouter(messages, apiKey, model);
-    res.json({
-      answer: result.content,
-      promptTokens: result.promptTokens,
-      completionTokens: result.completionTokens,
-      totalTokens: result.totalTokens,
-      contextSent: `Full PDF (${pdfStore.text.length} characters)`,
-      chunksUsed: 0,
-      totalChunks: 0,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── RAG Chat: Chunk → Embed → Retrieve → Prompt ──────────
-app.post('/api/chat/rag', async (req, res) => {
-  try {
-    const { question, apiKey, model, systemPrompt } = req.body;
-    validateApiKey(apiKey);
-    if (!pdfStore.text) return res.status(400).json({ error: 'No PDF uploaded' });
-
-    // 1. Chunk the PDF text
-    const chunks = chunkText(pdfStore.text, 500, 100);
-
-    // 2. Get embeddings for all chunks + the question
+    // 2. Embed all chunks + question
     const allTexts = [...chunks, question];
     const { embeddings, tokens: embedTokens } = await getEmbeddings(allTexts, apiKey);
 
     const questionEmbedding = embeddings[embeddings.length - 1];
     const chunkEmbeddings = embeddings.slice(0, -1);
 
-    // 3. Compute similarity and pick top 5
+    // 3. Score and retrieve all 5 chunks
     const scored = chunkEmbeddings.map((emb, i) => ({
       index: i,
       score: cosineSim(questionEmbedding, emb),
     }));
     scored.sort((a, b) => b.score - a.score);
-    const topK = scored.slice(0, 5);
-    const relevantChunks = topK.map(s => ({
+    const relevantChunks = scored.map(s => ({
       text: chunks[s.index],
       score: s.score,
     }));
 
-    // 4. Build context from relevant chunks only
-    const context = relevantChunks
-      .map((c, i) => `[Chunk ${i + 1} (relevance: ${(c.score * 100).toFixed(1)}%)]\n${c.text}`)
+    // 4. Tavily web search (if key provided)
+    let webResults = [];
+    if (tavilyKey && tavilyKey.trim()) {
+      const { results } = await callTavily(question, tavilyKey, 5);
+      webResults = results;
+    }
+
+    // 5. Build combined context
+    const ragContext = relevantChunks
+      .map((c, i) => `[PDF Chunk ${i + 1} (relevance: ${(c.score * 100).toFixed(1)}%)]\n${c.text}`)
       .join('\n\n');
+
+    let contextParts = [`=== DOCUMENT CONTEXT (5 chunks from uploaded document) ===\n${ragContext}`];
+
+    if (webResults.length > 0) {
+      const webContext = webResults
+        .map((r, i) => `[Web Source ${i + 1}: ${r.title} (${r.url})]\n${r.content}`)
+        .join('\n\n');
+      contextParts.push(`=== WEB SEARCH RESULTS (Tavily) ===\n${webContext}`);
+    }
+
+    const combinedContext = contextParts.join('\n\n');
 
     const baseSystem = systemPrompt?.trim()
       ? systemPrompt.trim()
-      : `You are a helpful assistant. Use ONLY the following relevant excerpts from a PDF document to answer the user's question. If the answer is not in the excerpts, say "I cannot find the answer in the provided context."`;
+      : `You are a helpful assistant with access to a document and live web search results. Prioritize the document excerpts for your answer, and supplement with web results when the document doesn't fully cover the question. Cite your sources (PDF chunk numbers or web URLs). If neither source has the answer, say "I cannot find the answer in the available sources."`;
 
     const messages = [
       {
         role: 'system',
-        content: `${baseSystem}\n\n--- RELEVANT EXCERPTS (RAG retrieved) ---\n${context}\n--- END OF EXCERPTS ---`
+        content: `${baseSystem}\n\n--- COMBINED CONTEXT ---\n${combinedContext}\n--- END OF CONTEXT ---`
       },
       { role: 'user', content: question },
     ];
 
     const result = await callOpenRouter(messages, apiKey, model);
+    const contextLabel = webResults.length > 0
+      ? `5 PDF chunks + ${webResults.length} web results`
+      : '5 PDF chunks';
+
     res.json({
       answer: result.content,
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
       totalTokens: result.totalTokens,
       embedTokens,
-      contextSent: `${relevantChunks.length} chunks out of ${chunks.length} total`,
+      contextSent: contextLabel,
       chunksUsed: relevantChunks.length,
       totalChunks: chunks.length,
       retrievedChunks: relevantChunks.map(c => ({
         preview: c.text.substring(0, 150) + '...',
         score: c.score,
       })),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── Web Search Chat: Tavily retrieve → Prompt (Web-RAG) ────
-app.post('/api/chat/search', async (req, res) => {
-  try {
-    const { question, apiKey, model, systemPrompt, tavilyKey } = req.body;
-    validateApiKey(apiKey);
-    validateTavilyKey(tavilyKey);
-
-    // 1. Retrieve live web results from Tavily
-    const { results } = await callTavily(question, tavilyKey, 5);
-    if (results.length === 0) {
-      return res.json({
-        answer: 'No web results were found for this query.',
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-        contextSent: '0 web results',
-        chunksUsed: 0,
-        totalChunks: 0,
-        sources: [],
-      });
-    }
-
-    // 2. Build context from the retrieved web results
-    const context = results
-      .map((r, i) => `[Source ${i + 1}: ${r.title} (${r.url})]\n${r.content}`)
-      .join('\n\n');
-
-    const baseSystem = systemPrompt?.trim()
-      ? systemPrompt.trim()
-      : `You are a helpful assistant with access to live web search results. Use ONLY the following web excerpts to answer the user's question, and cite the source number(s) you rely on. If the answer is not in the excerpts, say "I cannot find the answer in the web results."`;
-
-    const messages = [
-      {
-        role: 'system',
-        content: `${baseSystem}\n\n--- WEB SEARCH RESULTS (Tavily retrieved) ---\n${context}\n--- END OF RESULTS ---`
-      },
-      { role: 'user', content: question },
-    ];
-
-    const result = await callOpenRouter(messages, apiKey, model);
-    res.json({
-      answer: result.content,
-      promptTokens: result.promptTokens,
-      completionTokens: result.completionTokens,
-      totalTokens: result.totalTokens,
-      contextSent: `${results.length} web results`,
-      chunksUsed: results.length,
-      totalChunks: results.length,
-      sources: results.map(r => ({
+      sources: webResults.map(r => ({
         title: r.title,
         url: r.url,
         score: r.score,
@@ -336,4 +241,4 @@ app.post('/api/chat/search', async (req, res) => {
   }
 });
 
-app.listen(3001, () => console.log('✅ RAG Demo server running on http://localhost:3001'));
+app.listen(3001, () => console.log('✅ RAG Search Assistant running on http://localhost:3001'));

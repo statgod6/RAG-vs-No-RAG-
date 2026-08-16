@@ -4,30 +4,31 @@ import './App.css';
 
 const API_BASE = 'http://localhost:3001';
 
-function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPrompt, tavilyKey }) {
+function ChatPanel({ apiKey, model, pdfUploaded, systemPrompt, tavilyKey }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
 
-  // Only the PDF-based modes require an uploaded document
-  const needsPdf = type === 'norag' || type === 'rag';
-
   const sendQuestion = async () => {
     if (!input.trim()) return;
-    if (needsPdf && !pdfUploaded) return;
+    if (!pdfUploaded) return;
     const question = input.trim();
     setInput('');
     setLoading(true);
-
     setMessages(prev => [...prev, { role: 'user', content: question }]);
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat/${type}`, {
+      const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, apiKey, model, systemPrompt, tavilyKey }),
       });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Server returned non-JSON response. Is the backend running on port 3001?');
+      }
       const data = await res.json();
 
       if (data.error) {
@@ -52,26 +53,20 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
     setLoading(false);
   };
 
-  const badgeLabel = type === 'plain'
-    ? 'Plain QA — No Context'
-    : type === 'norag'
-      ? 'No RAG — Full Document'
-      : type === 'search'
-        ? 'Web Search — Tavily'
-        : 'RAG — Smart Retrieval';
+  const badgeLabel = pdfUploaded
+    ? (tavilyKey?.trim() ? 'RAG + Web Search' : 'RAG — Document Only')
+    : 'Awaiting Document';
 
-  const placeholder = needsPdf
-    ? (pdfUploaded ? 'Ask a question about the document...' : 'Upload a PDF or DOCX first')
-    : type === 'search'
-      ? 'Search the web...'
-      : 'Ask any question...';
+  const placeholder = pdfUploaded
+    ? 'Ask a question about the document...' 
+    : 'Upload a PDF or DOCX first';
 
-  const disabled = (needsPdf && !pdfUploaded) || loading;
+  const disabled = !pdfUploaded || loading;
 
   return (
-    <div className={`chat-panel ${color}`}>
+    <div className="chat-panel">
       <div className="panel-header">
-        <h2>{title}</h2>
+        <h2>RAG Search Assistant</h2>
         <span className="badge">{badgeLabel}</span>
       </div>
 
@@ -79,17 +74,17 @@ function ChatPanel({ title, type, pdfUploaded, apiKey, model, color, systemPromp
         <div className="stats-bar">
           <div className="stat">
             <span className="stat-label">Prompt Tokens</span>
-            <span className={`stat-value ${type === 'norag' ? 'high' : 'low'}`}>{stats.promptTokens}</span>
+            <span className="stat-value low">{stats.promptTokens}</span>
           </div>
           <div className="stat">
             <span className="stat-label">Total Tokens</span>
-            <span className={`stat-value ${type === 'norag' ? 'high' : 'low'}`}>{stats.totalTokens}</span>
+            <span className="stat-value low">{stats.totalTokens}</span>
           </div>
           <div className="stat">
-            <span className="stat-label">Context Sent</span>
+            <span className="stat-label">Context</span>
             <span className="stat-value small">{stats.contextSent}</span>
           </div>
-          {(type === 'rag') && stats.embedTokens > 0 && (
+          {stats.embedTokens > 0 && (
             <div className="stat">
               <span className="stat-label">Embed Tokens</span>
               <span className="stat-value low">{stats.embedTokens}</span>
@@ -194,8 +189,8 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Plain QA vs Web Search vs No-RAG vs RAG</h1>
-        <p className="subtitle">Compare how context strategy affects answer quality, token usage, and cost</p>
+        <h1>RAG Search Assistant</h1>
+        <p className="subtitle">Document retrieval + live web search powered by RAG &amp; Tavily</p>
       </header>
 
       <div className="config-bar">
@@ -250,50 +245,20 @@ export default function App() {
               className="system-prompt-input"
               value={systemPrompt}
               onChange={e => setSystemPrompt(e.target.value)}
-              placeholder="Leave empty for default prompts, or write your own system prompt for all three chat modes..."
+              placeholder="Leave empty for the default prompt, or write your own system prompt..."
               rows={3}
             />
           )}
         </div>
       </div>
 
-      <div className="panels-grid">
+      <div className="chat-wrapper">
         <ChatPanel
-          title="Plain QA"
-          type="plain"
-          pdfUploaded={true}
           apiKey={apiKey}
           model={model}
-          color="blue"
-          systemPrompt={systemPrompt}
-        />
-        <ChatPanel
-          title="Web Search"
-          type="search"
-          pdfUploaded={true}
-          apiKey={apiKey}
-          model={model}
-          color="purple"
+          pdfUploaded={!!pdfInfo}
           systemPrompt={systemPrompt}
           tavilyKey={tavilyKey}
-        />
-        <ChatPanel
-          title="No RAG"
-          type="norag"
-          pdfUploaded={!!pdfInfo}
-          apiKey={apiKey}
-          model={model}
-          color="red"
-          systemPrompt={systemPrompt}
-        />
-        <ChatPanel
-          title="RAG"
-          type="rag"
-          pdfUploaded={!!pdfInfo}
-          apiKey={apiKey}
-          model={model}
-          color="green"
-          systemPrompt={systemPrompt}
         />
       </div>
     </div>
